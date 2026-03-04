@@ -2,23 +2,53 @@
  * @file execute.c
  *
  * @brief Implements interface functions between Quash and the environment and
- * functions that interpret an execute commands.
- *
- * @note As you add things to this file you may want to change the method signature
+ * functions that interpret and execute commands.
  */
 
 #include "execute.h"
-#include <stdio.h>
 #include "quash.h"
-#include <unistd.h>
-#include <string.h>
+#include "command.h"
+#include "deque.h"
 
-// Remove this and all expansion calls to it
+#include <stdio.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/wait.h>
+#include <string.h>
+#include <stdlib.h>
+#include <signal.h>
+#include <limits.h>
+
+/***************************************************************************
+ * Deque type definitions for job/pid management
+ ***************************************************************************/
+
+IMPLEMENT_DEQUE_STRUCT(PidList, pid_t);
+IMPLEMENT_DEQUE(PidList, pid_t);
+
 /**
- * @brief Note calls to any function that requires implementation
+ * @brief Represents a background job tracked by Quash
  */
-#define IMPLEMENT_ME()                                                  \
-  fprintf(stderr, "IMPLEMENT ME: %s(line %d): %s()\n", __FILE__, __LINE__, __FUNCTION__)
+typedef struct Job {
+  int    job_id;    /**< Unique job identifier */
+  pid_t  first_pid; /**< PID of the first process in the job */
+  char*  cmd;       /**< malloc'd copy of the command string */
+} Job;
+
+IMPLEMENT_DEQUE_STRUCT(JobList, Job);
+IMPLEMENT_DEQUE(JobList, Job);
+
+/***************************************************************************
+ * Global state
+ ***************************************************************************/
+
+/** Background job queue */
+static JobList job_list;
+static bool    job_list_initialized = false;
+
+/** Per-script execution state (reset in run_script, used by create_process) */
+static int     pipe_read_fd = -1;   /**< Read-end of the previous pipe */
+static PidList current_pids;        /**< PIDs spawned in the current script */
 
 /***************************************************************************
  * Interface Functions
@@ -26,66 +56,66 @@
 
 // Return a string containing the current working directory.
 char* get_current_directory(bool* should_free) {
-  // TODO: Get the current working directory. This will fix the prompt path.
-  // HINT: This should be pretty simple
   static char buf[4096];
-
   if (getcwd(buf, sizeof(buf)) != NULL) {
     *should_free = false;
     return buf;
   }
-
-  // Change this to true if necessary
   *should_free = false;
-
   return "/";
 }
 
 // Returns the value of an environment variable env_var
 const char* lookup_env(const char* env_var) {
-  // TODO: Lookup environment variables. This is required for parser to be able
-  // to interpret variables from the command line and display the prompt
-  // correctly
-  // HINT: This should be pretty simple
   if (env_var == NULL) return "";
 
-    const char* val = getenv(env_var);
+  const char* val = getenv(env_var);
 
-    // Special fallback for HOSTNAME if it's not set
-    if (strcmp(env_var, "HOSTNAME") == 0) {
-        if (val == NULL || *val == '\0') {
-            static char hostname[256];
-            if (gethostname(hostname, sizeof(hostname)) == 0) {
-                return hostname;
-            }
-            return "localhost";  // ultimate fallback
-        }
-    }
-
-    return val ? val : "";
-}
-
-void write_env(const char* env_var, const char* val) {
-    if (env_var == NULL) return;
-
+  // Special fallback for HOSTNAME if unset in the environment
+  if (strcmp(env_var, "HOSTNAME") == 0) {
     if (val == NULL || *val == '\0') {
-        // Treat empty value as unset (common convention)
-        unsetenv(env_var);
-    } else {
-        // setenv copies the strings → safe even if caller frees them later
-        setenv(env_var, val, 1);
+      static char hostname[256];
+      if (gethostname(hostname, sizeof(hostname)) == 0)
+        return hostname;
+      return "localhost";
     }
+  }
+
+  return val ? val : "";
 }
 
-// Check the status of background jobs
-void check_jobs_bg_status() {
-  // TODO: Check on the statuses of all processes belonging to all background
-  // jobs. This function should remove jobs from the jobs queue once all
-  // processes belonging to a job have completed.
-  IMPLEMENT_ME();
+// Set an environment variable
+void write_env(const char* env_var, const char* val) {
+  if (env_var == NULL) return;
+  if (val == NULL || *val == '\0')
+    unsetenv(env_var);
+  else
+    setenv(env_var, val, 1);
+}
 
-  // TODO: Once jobs are implemented, uncomment and fill the following line
-  // print_job_bg_complete(job_id, pid, cmd);
+// Check the status of background jobs; remove and announce any that finished
+void check_jobs_bg_status() {
+  if (!job_list_initialized) return;
+
+  size_t len = length_JobList(&job_list);
+
+  for (size_t i = 0; i < len; i++) {
+    Job job = pop_front_JobList(&job_list);
+
+    int   status;
+    pid_t result = waitpid(job.first_pid, &status, WNOHANG);
+
+    if (result == 0) {
+      // Still running – put it back at the end of the queue
+      push_back_JobList(&job_list, job);
+    } else {
+      // Completed (result > 0) or already gone (result == -1 / ECHILD)
+      print_job_bg_complete(job.job_id, job.first_pid, job.cmd);
+      // Reap any other child processes that belong to this job
+      while (waitpid(-1, NULL, WNOHANG) > 0);
+      free(job.cmd);
+    }
+  }
 }
 
 // Prints the job id number, the process id of the first process belonging to
@@ -110,104 +140,97 @@ void print_job_bg_complete(int job_id, pid_t pid, const char* cmd) {
 /***************************************************************************
  * Functions to process commands
  ***************************************************************************/
-// Run a program reachable by the path environment variable, relative path, or
-// absolute path
+
+// Run a program reachable by PATH, relative path, or absolute path
 void run_generic(GenericCommand cmd) {
-  // Execute a program with a list of arguments. The `args` array is a NULL
-  // terminated (last string is always NULL) list of strings. The first element
-  // in the array is the executable
-  char* exec = cmd.args[0];
+  char*  exec = cmd.args[0];
   char** args = cmd.args;
 
-  // TODO: Remove warning silencers
-  (void) exec; // Silence unused variable warning
-  (void) args; // Silence unused variable warning
-
-  // TODO: Implement run generic
-  IMPLEMENT_ME();
-
+  execvp(exec, args);
   perror("ERROR: Failed to execute program");
+  exit(EXIT_FAILURE);
 }
 
-// Print strings
+// Print strings separated by spaces followed by a newline
 void run_echo(EchoCommand cmd) {
-  // Print an array of strings. The args array is a NULL terminated (last
-  // string is always NULL) list of strings.
   char** str = cmd.args;
 
-  // TODO: Remove warning silencers
-  (void) str; // Silence unused variable warning
+  for (int i = 0; str[i] != NULL; i++) {
+    if (i > 0) printf(" ");
+    printf("%s", str[i]);
+  }
+  printf("\n");
 
-  // TODO: Implement echo
-  IMPLEMENT_ME();
-
-  // Flush the buffer before returning
   fflush(stdout);
 }
 
 // Sets an environment variable
 void run_export(ExportCommand cmd) {
-  // Write an environment variable
-  const char* env_var = cmd.env_var;
-  const char* val = cmd.val;
-
-  // TODO: Remove warning silencers
-  (void) env_var; // Silence unused variable warning
-  (void) val;     // Silence unused variable warning
-
-  // TODO: Implement export.
-  // HINT: This should be quite simple.
-  IMPLEMENT_ME();
+  write_env(cmd.env_var, cmd.val);
 }
 
-// Changes the current working directory
+// Changes the current working directory and updates PWD
 void run_cd(CDCommand cmd) {
-  // Get the directory name
   const char* dir = cmd.dir;
 
-  // Check if the directory is valid
   if (dir == NULL) {
     perror("ERROR: Failed to resolve path");
     return;
   }
 
-  // TODO: Change directory
+  char resolved[PATH_MAX];
+  if (realpath(dir, resolved) == NULL) {
+    perror("ERROR: Failed to resolve path");
+    return;
+  }
 
-  // TODO: Update the PWD environment variable to be the new current working
-  // directory and optionally update OLD_PWD environment variable to be the old
-  // working directory.
-  IMPLEMENT_ME();
+  if (chdir(resolved) != 0) {
+    perror("ERROR: Failed to change directory");
+    return;
+  }
+
+  write_env("PWD", resolved);
 }
 
-// Sends a signal to all processes contained in a job
+// Sends a signal to the first process of the given background job
 void run_kill(KillCommand cmd) {
   int signal = cmd.sig;
   int job_id = cmd.job;
 
-  // TODO: Remove warning silencers
-  (void) signal; // Silence unused variable warning
-  (void) job_id; // Silence unused variable warning
+  if (!job_list_initialized) return;
 
-  // TODO: Kill all processes associated with a background job
-  IMPLEMENT_ME();
+  size_t len = length_JobList(&job_list);
+  for (size_t i = 0; i < len; i++) {
+    Job job = pop_front_JobList(&job_list);
+    if (job.job_id == job_id)
+      kill(job.first_pid, signal);
+    push_back_JobList(&job_list, job);
+  }
 }
-
 
 // Prints the current working directory to stdout
 void run_pwd() {
-  // TODO: Print the current working directory
-  IMPLEMENT_ME();
-
-  // Flush the buffer before returning
+  bool  should_free = false;
+  char* cwd = get_current_directory(&should_free);
+  printf("%s\n", cwd);
+  if (should_free) free(cwd);
   fflush(stdout);
 }
 
 // Prints all background jobs currently in the job list to stdout
 void run_jobs() {
-  // TODO: Print background jobs
-  IMPLEMENT_ME();
+  if (!job_list_initialized) {
+    fflush(stdout);
+    return;
+  }
 
-  // Flush the buffer before returning
+  size_t len = length_JobList(&job_list);
+  for (size_t i = 0; i < len; i++) {
+    Job job = pop_front_JobList(&job_list);
+    print_job(job.job_id, job.first_pid, job.cmd);
+    push_back_JobList(&job_list, job);
+  }
+
   fflush(stdout);
 }
 
@@ -216,15 +239,7 @@ void run_jobs() {
  ***************************************************************************/
 
 /**
- * @brief A dispatch function to resolve the correct @a Command variant
- * function for child processes.
- *
- * This version of the function is tailored to commands that should be run in
- * the child process of a fork.
- *
- * @param cmd The Command to try to run
- *
- * @sa Command
+ * @brief Dispatch table for commands that run inside a child process
  */
 void child_run_command(Command cmd) {
   CommandType type = get_command_type(cmd);
@@ -233,41 +248,28 @@ void child_run_command(Command cmd) {
   case GENERIC:
     run_generic(cmd.generic);
     break;
-
   case ECHO:
     run_echo(cmd.echo);
     break;
-
   case PWD:
     run_pwd();
     break;
-
   case JOBS:
     run_jobs();
     break;
-
   case EXPORT:
   case CD:
   case KILL:
   case EXIT:
   case EOC:
     break;
-
   default:
     fprintf(stderr, "Unknown command type: %d\n", type);
   }
 }
 
 /**
- * @brief A dispatch function to resolve the correct @a Command variant
- * function for the quash process.
- *
- * This version of the function is tailored to commands that should be run in
- * the parent process (quash).
- *
- * @param cmd The Command to try to run
- *
- * @sa Command
+ * @brief Dispatch table for commands that must run in the parent (quash) process
  */
 void parent_run_command(Command cmd) {
   CommandType type = get_command_type(cmd);
@@ -276,15 +278,12 @@ void parent_run_command(Command cmd) {
   case EXPORT:
     run_export(cmd.export);
     break;
-
   case CD:
     run_cd(cmd.cd);
     break;
-
   case KILL:
     run_kill(cmd.kill);
     break;
-
   case GENERIC:
   case ECHO:
   case PWD:
@@ -292,49 +291,101 @@ void parent_run_command(Command cmd) {
   case EXIT:
   case EOC:
     break;
-
   default:
     fprintf(stderr, "Unknown command type: %d\n", type);
   }
 }
 
 /**
- * @brief Creates one new process centered around the @a Command in the @a
- * CommandHolder setting up redirects and pipes where needed
- *
- * @note Processes are not the same as jobs. A single job can have multiple
- * processes running under it. This function creates a process that is part of a
- * larger job.
- *
- * @note Not all commands should be run in the child process. A few need to
- * change the quash process in some way
- *
- * @param holder The CommandHolder to try to run
- *
- * @sa Command CommandHolder
+ * @brief Fork a child process, wire up any pipes / redirects, and execute
+ *        the command.  Updates global pipe_read_fd and current_pids.
  */
 void create_process(CommandHolder holder) {
-  // Read the flags field from the parser
   bool p_in  = holder.flags & PIPE_IN;
   bool p_out = holder.flags & PIPE_OUT;
   bool r_in  = holder.flags & REDIRECT_IN;
   bool r_out = holder.flags & REDIRECT_OUT;
-  bool r_app = holder.flags & REDIRECT_APPEND; // This can only be true if r_out
-                                               // is true
+  bool r_app = holder.flags & REDIRECT_APPEND;
 
-  // TODO: Remove warning silencers
-  (void) p_in;  // Silence unused variable warning
-  (void) p_out; // Silence unused variable warning
-  (void) r_in;  // Silence unused variable warning
-  (void) r_out; // Silence unused variable warning
-  (void) r_app; // Silence unused variable warning
+  int new_pipe[2] = {-1, -1};
 
-  // TODO: Setup pipes, redirects, and new process
-  IMPLEMENT_ME();
+  // Create the pipe that this process will write into (if needed)
+  if (p_out) {
+    if (pipe(new_pipe) < 0) {
+      perror("ERROR: Failed to create pipe");
+      return;
+    }
+  }
 
-  //parent_run_command(holder.cmd); // This should be done in the parent branch of
-                                  // a fork
-  //child_run_command(holder.cmd); // This should be done in the child branch of a fork
+  pid_t pid = fork();
+
+  if (pid < 0) {
+    perror("ERROR: Failed to fork");
+    return;
+  }
+
+  if (pid == 0) {
+    /* ---- Child process ---- */
+
+    // Consume the read-end of the previous pipe as stdin
+    if (p_in && pipe_read_fd != -1) {
+      dup2(pipe_read_fd, STDIN_FILENO);
+      close(pipe_read_fd);
+    }
+
+    // Wire the write-end of the new pipe to stdout
+    if (p_out) {
+      close(new_pipe[0]);            // child doesn't read from this pipe
+      dup2(new_pipe[1], STDOUT_FILENO);
+      close(new_pipe[1]);
+    }
+
+    // Redirect stdin from a file
+    if (r_in) {
+      int fd = open(holder.redirect_in, O_RDONLY);
+      if (fd < 0) {
+        perror("ERROR: Failed to open redirect input file");
+        exit(EXIT_FAILURE);
+      }
+      dup2(fd, STDIN_FILENO);
+      close(fd);
+    }
+
+    // Redirect stdout to a file (truncate or append)
+    if (r_out) {
+      int oflags = O_WRONLY | O_CREAT | (r_app ? O_APPEND : O_TRUNC);
+      int fd = open(holder.redirect_out, oflags, 0644);
+      if (fd < 0) {
+        perror("ERROR: Failed to open redirect output file");
+        exit(EXIT_FAILURE);
+      }
+      dup2(fd, STDOUT_FILENO);
+      close(fd);
+    }
+
+    child_run_command(holder.cmd);
+    exit(EXIT_SUCCESS);
+
+  } else {
+    /* ---- Parent process ---- */
+
+    // Close the read-end of the previous pipe now that the child has it
+    if (p_in && pipe_read_fd != -1) {
+      close(pipe_read_fd);
+      pipe_read_fd = -1;
+    }
+
+    // Hand the read-end of the new pipe to the next create_process call
+    if (p_out) {
+      close(new_pipe[1]);            // parent doesn't write into this pipe
+      pipe_read_fd = new_pipe[0];
+    }
+
+    // Execute parent-only commands (cd, export, kill)
+    parent_run_command(holder.cmd);
+
+    push_back_PidList(&current_pids, pid);
+  }
 }
 
 // Run a list of commands
@@ -350,23 +401,57 @@ void run_script(CommandHolder* holders) {
     return;
   }
 
+  // Lazily initialise the job list once
+  if (!job_list_initialized) {
+    job_list = new_JobList(10);
+    job_list_initialized = true;
+  }
+
+  // Reset per-script state
+  current_pids = new_PidList(8);
+  pipe_read_fd = -1;
+
   CommandType type;
 
-  // Run all commands in the `holder` array
+  // Fork a process for every command in the holder array
   for (int i = 0; (type = get_command_holder_type(holders[i])) != EOC; ++i)
     create_process(holders[i]);
 
-  if (!(holders[0].flags & BACKGROUND)) {
-    // Not a background Job
-    // TODO: Wait for all processes under the job to complete
-    IMPLEMENT_ME();
+  // Close any dangling pipe read-end left over from the last command
+  if (pipe_read_fd != -1) {
+    close(pipe_read_fd);
+    pipe_read_fd = -1;
   }
-  else {
-    // A background job.
-    // TODO: Push the new job to the job queue
-    IMPLEMENT_ME();
 
-    // TODO: Once jobs are implemented, uncomment and fill the following line
-    // print_job_bg_start(job_id, pid, cmd);
+  if (!(holders[0].flags & BACKGROUND)) {
+    /* ---- Foreground job: wait for every child ---- */
+    while (!is_empty_PidList(&current_pids)) {
+      pid_t pid = pop_front_PidList(&current_pids);
+      int status;
+      waitpid(pid, &status, 0);
+    }
+    destroy_PidList(&current_pids);
+
+  } else {
+    /* ---- Background job: register in the job list ---- */
+    pid_t first_pid = peek_front_PidList(&current_pids);
+    destroy_PidList(&current_pids);
+
+    // Job id is one greater than the current maximum (bash convention)
+    int max_id = 0;
+    size_t len = length_JobList(&job_list);
+    for (size_t i = 0; i < len; i++) {
+      Job j = pop_front_JobList(&job_list);
+      if (j.job_id > max_id) max_id = j.job_id;
+      push_back_JobList(&job_list, j);
+    }
+    int job_id = max_id + 1;
+
+    char* cmd = get_command_string();   // strdup'd – freed when job completes
+
+    Job new_job = { job_id, first_pid, cmd };
+    push_back_JobList(&job_list, new_job);
+
+    print_job_bg_start(job_id, first_pid, cmd);
   }
 }
