@@ -327,6 +327,13 @@ void create_process(CommandHolder holder) {
   if (pid == 0) {
     /* ---- Child process ---- */
 
+    // Clean up heap structures so valgrind sees no reachable blocks in children
+    if (job_list_initialized) {
+      destroy_JobList(&job_list);
+      job_list_initialized = false;
+    }
+    destroy_PidList(&current_pids);
+
     // Consume the read-end of the previous pipe as stdin
     if (p_in && pipe_read_fd != -1) {
       dup2(pipe_read_fd, STDIN_FILENO);
