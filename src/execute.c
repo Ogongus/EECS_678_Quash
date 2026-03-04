@@ -45,6 +45,7 @@ IMPLEMENT_DEQUE(JobList, Job);
 /** Background job queue */
 static JobList job_list;
 static bool    job_list_initialized = false;
+static int     next_job_id = 1;           /**< Monotonically increasing job ID */
 
 /** Per-script execution state (reset in run_script, used by create_process) */
 static int     pipe_read_fd = -1;   /**< Read-end of the previous pipe */
@@ -327,13 +328,6 @@ void create_process(CommandHolder holder) {
   if (pid == 0) {
     /* ---- Child process ---- */
 
-    // Clean up heap structures so valgrind sees no reachable blocks in children
-    if (job_list_initialized) {
-      destroy_JobList(&job_list);
-      job_list_initialized = false;
-    }
-    destroy_PidList(&current_pids);
-
     // Consume the read-end of the previous pipe as stdin
     if (p_in && pipe_read_fd != -1) {
       dup2(pipe_read_fd, STDIN_FILENO);
@@ -444,15 +438,8 @@ void run_script(CommandHolder* holders) {
     pid_t first_pid = peek_front_PidList(&current_pids);
     destroy_PidList(&current_pids);
 
-    // Job id is one greater than the current maximum (bash convention)
-    int max_id = 0;
-    size_t len = length_JobList(&job_list);
-    for (size_t i = 0; i < len; i++) {
-      Job j = pop_front_JobList(&job_list);
-      if (j.job_id > max_id) max_id = j.job_id;
-      push_back_JobList(&job_list, j);
-    }
-    int job_id = max_id + 1;
+    // Job id is a monotonically increasing counter (never reuses IDs)
+    int job_id = next_job_id++;
 
     char* cmd = get_command_string();   // strdup'd – freed when job completes
 
