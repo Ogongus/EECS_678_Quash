@@ -71,6 +71,7 @@ $(OBJDIR)%.o: $(SRCDIR)%.c $(HFILES)
 
 # Build and run the program
 test: all
+	chmod +x run_tests.bash
 	./run_tests.bash -p
 
 # Build the documentation for the project
