@@ -305,8 +305,8 @@ void create_process(CommandHolder holder) {
   bool p_in  = holder.flags & PIPE_IN;
   bool p_out = holder.flags & PIPE_OUT;
   bool r_in  = holder.flags & REDIRECT_IN;
-  bool r_out = holder.flags & REDIRECT_OUT;
   bool r_app = holder.flags & REDIRECT_APPEND;
+  bool r_out = (holder.flags & REDIRECT_OUT) || r_app;
 
   int new_pipe[2] = {-1, -1};
 
@@ -327,6 +327,13 @@ void create_process(CommandHolder holder) {
 
   if (pid == 0) {
     /* ---- Child process ---- */
+
+    // Clean up heap so valgrind sees no reachable blocks in children
+    if (job_list_initialized) {
+      destroy_JobList(&job_list);
+      job_list_initialized = false;
+    }
+    destroy_PidList(&current_pids);
 
     // Consume the read-end of the previous pipe as stdin
     if (p_in && pipe_read_fd != -1) {
