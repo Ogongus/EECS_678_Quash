@@ -1,0 +1,21 @@
+==5757== Memcheck, a memory error detector
+==5757== Copyright (C) 2002-2022, and GNU GPL'd, by Julian Seward et al.
+==5757== Using Valgrind-3.22.0 and LibVEX; rerun with -h for copyright info
+==5757== Command: /home/whjtan/quash/quash
+==5757== 
+==5757== 
+==5757== HEAP SUMMARY:
+==5757==     in use at exit: 160 bytes in 1 blocks
+==5757==   total heap usage: 9 allocs, 8 frees, 22,090 bytes allocated
+==5757== 
+==5757== LEAK SUMMARY:
+==5757==    definitely lost: 0 bytes in 0 blocks
+==5757==    indirectly lost: 0 bytes in 0 blocks
+==5757==      possibly lost: 0 bytes in 0 blocks
+==5757==    still reachable: 160 bytes in 1 blocks
+==5757==         suppressed: 0 bytes in 0 blocks
+==5757== Reachable blocks (those to which a pointer was found) are not shown.
+==5757== To see them, rerun with: --leak-check=full --show-leak-kinds=all
+==5757== 
+==5757== For lists of detected and suppressed errors, rerun with: -s
+==5757== ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 0 from 0)
