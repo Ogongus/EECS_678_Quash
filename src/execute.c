@@ -389,6 +389,19 @@ void create_process(CommandHolder holder) {
   }
 }
 
+// Clean up the job list - called via atexit in quash.c
+void destroy_job_list() {
+  if (job_list_initialized) {
+    // Free any remaining job cmd strings before destroying the list
+    while (!is_empty_JobList(&job_list)) {
+      Job job = pop_front_JobList(&job_list);
+      free(job.cmd);
+    }
+    destroy_JobList(&job_list);
+    job_list_initialized = false;
+  }
+}
+
 // Run a list of commands
 void run_script(CommandHolder* holders) {
   if (holders == NULL)

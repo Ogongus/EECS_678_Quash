@@ -49,6 +49,11 @@ char* get_current_directory(bool* should_free);
 void check_jobs_bg_status();
 
 /**
+ * @brief Clean up the background job list. Should be registered with atexit().
+ */
+void destroy_job_list();
+
+/**
  * @brief Print a job to standard out
  *
  * We use the minimum of what a Job structure should contain to pass to this

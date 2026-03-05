@@ -98,6 +98,7 @@ int main(int argc, char** argv) {
     fflush(stdout);
   }
 
+  atexit(destroy_job_list);
   atexit(destroy_parser);
   atexit(destroy_memory_pool);
 
