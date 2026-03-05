@@ -30,9 +30,9 @@ IMPLEMENT_DEQUE(PidList, pid_t);
  * @brief Represents a background job tracked by Quash
  */
 typedef struct Job {
-  int    job_id;    /**< Unique job identifier */
-  pid_t  first_pid; /**< PID of the first process in the job */
-  char*  cmd;       /**< malloc'd copy of the command string */
+  int   job_id;    /**< Unique job identifier */
+  pid_t first_pid; /**< PID of the first process in the job */
+  char* cmd;       /**< malloc'd copy of the command string */
 } Job;
 
 IMPLEMENT_DEQUE_STRUCT(JobList, Job);
@@ -45,11 +45,11 @@ IMPLEMENT_DEQUE(JobList, Job);
 /** Background job queue */
 static JobList job_list;
 static bool    job_list_initialized = false;
-static int     next_job_id = 1;           /**< Monotonically increasing job ID */
+static int     next_job_id = 1; /**< Monotonically increasing job ID */
 
 /** Per-script execution state (reset in run_script, used by create_process) */
-static int     pipe_read_fd = -1;   /**< Read-end of the previous pipe */
-static PidList current_pids;        /**< PIDs spawned in the current script */
+static int     pipe_read_fd = -1; /**< Read-end of the previous pipe */
+static PidList current_pids;      /**< PIDs spawned in the current script */
 
 /***************************************************************************
  * Interface Functions
@@ -72,7 +72,7 @@ const char* lookup_env(const char* env_var) {
 
   const char* val = getenv(env_var);
 
-  // Special fallback for HOSTNAME if unset in the environment
+  // Special fallback for HOSTNAME if unset in environment
   if (strcmp(env_var, "HOSTNAME") == 0) {
     if (val == NULL || *val == '\0') {
       static char hostname[256];
@@ -107,12 +107,12 @@ void check_jobs_bg_status() {
     pid_t result = waitpid(job.first_pid, &status, WNOHANG);
 
     if (result == 0) {
-      // Still running – put it back at the end of the queue
+      // Still running - put it back at the end of the queue
       push_back_JobList(&job_list, job);
     } else {
       // Completed (result > 0) or already gone (result == -1 / ECHILD)
       print_job_bg_complete(job.job_id, job.first_pid, job.cmd);
-      // Reap any other child processes that belong to this job
+      // Reap any other children that may belong to this job
       while (waitpid(-1, NULL, WNOHANG) > 0);
       free(job.cmd);
     }
@@ -299,7 +299,7 @@ void parent_run_command(Command cmd) {
 
 /**
  * @brief Fork a child process, wire up any pipes / redirects, and execute
- *        the command.  Updates global pipe_read_fd and current_pids.
+ *        the command. Updates global pipe_read_fd and current_pids.
  */
 void create_process(CommandHolder holder) {
   bool p_in  = holder.flags & PIPE_IN;
@@ -336,7 +336,7 @@ void create_process(CommandHolder holder) {
 
     // Wire the write-end of the new pipe to stdout
     if (p_out) {
-      close(new_pipe[0]);            // child doesn't read from this pipe
+      close(new_pipe[0]);          // child doesn't read from this pipe
       dup2(new_pipe[1], STDOUT_FILENO);
       close(new_pipe[1]);
     }
@@ -378,7 +378,7 @@ void create_process(CommandHolder holder) {
 
     // Hand the read-end of the new pipe to the next create_process call
     if (p_out) {
-      close(new_pipe[1]);            // parent doesn't write into this pipe
+      close(new_pipe[1]);          // parent doesn't write into this pipe
       pipe_read_fd = new_pipe[0];
     }
 
@@ -392,7 +392,6 @@ void create_process(CommandHolder holder) {
 // Clean up the job list - called via atexit in quash.c
 void destroy_job_list() {
   if (job_list_initialized) {
-    // Free any remaining job cmd strings before destroying the list
     while (!is_empty_JobList(&job_list)) {
       Job job = pop_front_JobList(&job_list);
       free(job.cmd);
@@ -451,10 +450,9 @@ void run_script(CommandHolder* holders) {
     pid_t first_pid = peek_front_PidList(&current_pids);
     destroy_PidList(&current_pids);
 
-    // Job id is a monotonically increasing counter (never reuses IDs)
     int job_id = next_job_id++;
 
-    char* cmd = get_command_string();   // strdup'd – freed when job completes
+    char* cmd = get_command_string(); // strdup'd - freed when job completes
 
     Job new_job = { job_id, first_pid, cmd };
     push_back_JobList(&job_list, new_job);
