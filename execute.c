@@ -300,6 +300,27 @@ void parent_run_command(Command cmd) {
 }
 
 /**
+ * @brief Free heap memory inherited from the parent after fork() so that
+ *        Valgrind does not report still-reachable blocks in child processes.
+ *        This must NOT run destructors on job->cmd strings since those are
+ *        owned by the parent.
+ */
+static void child_cleanup_inherited_state() {
+  // Free current_pids data array (no destructor needed for pid_t)
+  if (current_pids.data != NULL) {
+    free(current_pids.data);
+    current_pids.data = NULL;
+  }
+
+  // Free job_list data array without running the destructor
+  // (parent still owns job->cmd strings)
+  if (job_list_initialized && job_list.data != NULL) {
+    free(job_list.data);
+    job_list.data = NULL;
+  }
+}
+
+/**
  * @brief Fork a child process, wire up any pipes / redirects, and execute
  *        the command. Updates global pipe_read_fd and current_pids.
  */
@@ -366,6 +387,7 @@ void create_process(CommandHolder holder) {
       close(fd);
     }
 
+    child_cleanup_inherited_state();
     child_run_command(holder.cmd);
     exit(EXIT_SUCCESS);
 
