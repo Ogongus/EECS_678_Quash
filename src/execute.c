@@ -103,7 +103,7 @@ void check_jobs_bg_status() {
   for (size_t i = 0; i < len; i++) {
     Job job = pop_front_JobList(&job_list);
 
-    int   status;
+    int status;
     pid_t result = waitpid(job.first_pid, &status, WNOHANG);
 
     if (result == 0) {
@@ -198,7 +198,9 @@ void run_kill(KillCommand cmd) {
   int signal = cmd.sig;
   int job_id = cmd.job;
 
-  if (!job_list_initialized) return;
+  if (!job_list_initialized) {
+    return;
+  }
 
   size_t len = length_JobList(&job_list);
   for (size_t i = 0; i < len; i++) {
